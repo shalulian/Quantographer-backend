@@ -9,25 +9,27 @@ CORS(app)
 
 @app.route("/qasm", methods=["POST"])
 def toQasm():
-    js = request.get_json()
-    if (js['code'].find("qc") == -1):
-        return {"code": ""}
-    exec(js['code'].replace("\\n", "\n"), globals())
-    return {"code": str(qc.qasm())}
+    try:
+        loc = {}
+        js = request.get_json()
+        exec(js['code'].replace("\\n", "\n"), {}, loc)
+        return {"code": str(loc['qc'].qasm())}
+    except Exception as e:
+        return str(e), 400
 
 @app.route("/qiskit_draw", methods=["POST"])
 def qiskit_draw():
-    js = request.get_json()
-    if (js['code'].find("qc") == -1):
-        return {"pic": ""}
-    exec(js['code'].replace("\\n", "\n"), globals())
-    plt = qc.draw('mpl')
-    s = io.BytesIO()
-    # plt.plot(list(range(100)))
-    plt.savefig(s, format='png', bbox_inches="tight")
-    # plt.close()
-    s = base64.b64encode(s.getvalue()).decode("utf-8").replace("\n", "")
-    return {"pic": "data:image/png;base64,%s" % s}
+    try:
+        loc = {}
+        js = request.get_json()
+        exec(js['code'].replace("\\n", "\n"), {}, loc)
+        plt = loc['qc'].draw('mpl')
+        s = io.BytesIO()
+        plt.savefig(s, format='png', bbox_inches="tight")
+        s = base64.b64encode(s.getvalue()).decode("utf-8").replace("\n", "")
+        return {"pic": "data:image/png;base64,%s" % s}
+    except Exception as e:
+        return str(e), 400
 
 @app.route("/simulation", methods=["POST"])
 def simu():
