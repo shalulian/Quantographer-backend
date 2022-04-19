@@ -1,6 +1,8 @@
 from flask import request, Flask
 from flask_cors import CORS
 from qiskit import IBMQ, transpile, Aer, execute
+import io
+import base64
 
 app = Flask(__name__)
 CORS(app)
@@ -16,13 +18,21 @@ def toQasm():
 @app.route("/qiskit_draw", methods=["POST"])
 def qiskit_draw():
     js = request.get_json()
-    exec(js['code'].replace("\\n", "\n"), locals())
-    return {"code": qc.draw('mpl')}
+    if (js['code'].find("qc") == -1):
+        return {"pic": ""}
+    exec(js['code'].replace("\\n", "\n"), globals())
+    plt = qc.draw('mpl')
+    s = io.BytesIO()
+    # plt.plot(list(range(100)))
+    plt.savefig(s, format='png', bbox_inches="tight")
+    # plt.close()
+    s = base64.b64encode(s.getvalue()).decode("utf-8").replace("\n", "")
+    return {"pic": "data:image/png;base64,%s" % s}
 
 @app.route("/simulation", methods=["POST"])
 def simu():
     js = request.get_json()
-    exec(js['code'].replace("\\n", "\n"), locals())
+    exec(js['code'].replace("\\n", "\n"), globals())
     backend = Aer.get_backend(js.get('backend'))
     shots = js.get('shots')
     result = execute(qc, backend, shots=shots).result()
@@ -31,7 +41,7 @@ def simu():
 @app.route("/transpile", methods=["POST"])
 def trans():
     js = request.get_json()
-    exec(js['code'].replace("\\n", "\n"), locals())
+    exec(js['code'].replace("\\n", "\n"), globals())
     backend = js.get('backend')
     layout_method = js.get('layout_method')
     routing_method = js.get('routing_method')
