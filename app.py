@@ -1,24 +1,28 @@
 from flask import request, Flask
+from flask_cors import CORS
 from qiskit import IBMQ, transpile, Aer, execute
 
 app = Flask(__name__)
+CORS(app)
 
 @app.route("/qasm", methods=["POST"])
 def toQasm():
     js = request.get_json()
+    if (js['code'].find("qc") == -1):
+        return {"code": ""}
     exec(js['code'].replace("\\n", "\n"), globals())
     return {"code": str(qc.qasm())}
 
 @app.route("/qiskit_draw", methods=["POST"])
 def qiskit_draw():
     js = request.get_json()
-    exec(js['code'].replace("\\n", "\n"), globals())
+    exec(js['code'].replace("\\n", "\n"), locals())
     return {"code": qc.draw('mpl')}
 
 @app.route("/simulation", methods=["POST"])
 def simu():
     js = request.get_json()
-    exec(js['code'].replace("\\n", "\n"), globals())
+    exec(js['code'].replace("\\n", "\n"), locals())
     backend = Aer.get_backend(js.get('backend'))
     shots = js.get('shots')
     result = execute(qc, backend, shots=shots).result()
@@ -27,7 +31,7 @@ def simu():
 @app.route("/transpile", methods=["POST"])
 def trans():
     js = request.get_json()
-    exec(js['code'].replace("\\n", "\n"), globals())
+    exec(js['code'].replace("\\n", "\n"), locals())
     backend = js.get('backend')
     layout_method = js.get('layout_method')
     routing_method = js.get('routing_method')
