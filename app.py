@@ -1,8 +1,9 @@
 from flask import request, Flask
 from flask_cors import CORS
 from qiskit import IBMQ, transpile, Aer, execute
-import io
-import base64
+from collections import defaultdict
+from qiskit.test.mock import FakeProvider
+import io, base64, re, json
 
 app = Flask(__name__)
 CORS(app)
@@ -12,6 +13,50 @@ def mpl2base64(mpl):
     mpl.savefig(s, format='png', bbox_inches="tight")
     s = base64.b64encode(s.getvalue()).decode("utf-8").replace("\n", "")
     return "data:image/png;base64,%s" % s
+
+def get_error(gate):
+  for param in gate.parameters:
+    if param.name == 'gate_error':
+      return param.value
+  return 0
+
+def get_errors(backend):
+    NAME_EXTRACTOR = re.compile(r'^([a-z]+)(.*)')
+
+    configs = backend.configuration()
+    props = backend.properties()
+
+    gates_errors = defaultdict(list)
+    for gate in props.gates:
+        extract_res = NAME_EXTRACTOR.match(gate.name)
+        name, _ = extract_res.groups()
+        error = get_error(gate)
+        gates_errors[name].append(error)
+
+    for gate, errors in gates_errors.items():
+        gates_errors[gate] = sum(errors) / len(errors)
+
+    return gates_errors
+
+DEFAULT_ERRORS = {
+  'cx': 1.327e-2, 
+  'sx': 3.770e-4, 
+  'x': 3.770e-4
+}
+
+def calc_error(ops_dict, error_dict=DEFAULT_ERRORS):
+  p_not_errors = 1.0
+  for gate_name, amount in ops_dict.items():
+    try:
+      p_err = error_dict[gate_name]
+    except:
+      # skip unknow error gates
+      pass
+    else:
+      p_not_error = 1.0 - p_err
+      p_not_errors *= p_not_error ** amount
+  # return 1.0 - p_not_errors
+  return (1.0 - p_not_errors)*10000
 
 @app.route("/qasm", methods=["POST"])
 def toQasm():
@@ -30,6 +75,35 @@ def qiskit_draw():
         js = request.get_json()
         exec(js['code'].replace("\\n", "\n"), {}, loc)
         return {"pic": mpl2base64(loc['qc'].draw('mpl'))}
+    except Exception as e:
+        return str(e), 400
+
+@app.route("/recommend", methods=["POST"])
+def rec():
+    try:
+        loc = {}
+        js = request.get_json()
+        exec(js['code'].replace("\\n", "\n"), {}, loc)
+        backend = FakeProvider().get_backend("fake_"+js.get('backend'))
+        layouts = ['noise_adaptive', 'dense', 'trivial']
+        routings = ['stochastic', 'basic']
+        optlvls = range(4)
+        gates_errors = get_errors(backend)
+        res = []
+        for layout in layouts:
+            for routing in routings:
+                for optlvl in optlvls:
+                    qcAmount = {}
+                    gateWithAmount = {}
+                    qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout, routing_method=routing, optimization_level=optlvl)
+                    for name, amount in qcTrans.count_ops().items():
+                        qcAmount[name] = amount
+                    for name, _ in gates_errors.items():
+                        if name not in ['id', 'reset']:
+                            gateWithAmount[name] = qcAmount.get(name, 0)
+                    acc_err = calc_error(gateWithAmount, gates_errors)
+                    res.append({'optlvl': optlvl, 'layout': layout, 'routing': routing, 'acc_err': acc_err/100})
+        return json.dumps(res)
     except Exception as e:
         return str(e), 400
 
@@ -56,8 +130,7 @@ def trans():
         layout_method = js.get('layout_method')
         routing_method = js.get('routing_method')
         scheduling_method = js.get('scheduling_method')
-        basis_gates = ['u1', 'u2', 'u3', 'cx'] if backend == None else js.get('basis_gates')
-        qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout_method, routing_method=routing_method, scheduling_method=scheduling_method, basis_gates=basis_gates)
+        qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout_method, routing_method=routing_method, scheduling_method=scheduling_method)
         return {"pic": mpl2base64(qcTrans.draw('mpl'))}
     except Exception as e:
         return str(e), 400
