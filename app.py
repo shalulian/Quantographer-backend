@@ -103,6 +103,7 @@ def rec():
                             gateWithAmount[name] = qcAmount.get(name, 0)
                     acc_err = calc_error(gateWithAmount, gates_errors)
                     res.append({'optlvl': optlvl, 'layout': layout, 'routing': routing, 'acc_err': acc_err/100})
+        res = sorted(res, key = lambda i: i['acc_err'])
         return json.dumps(res)
     except Exception as e:
         return str(e), 400
