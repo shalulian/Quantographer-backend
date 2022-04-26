@@ -84,7 +84,7 @@ def rec():
         loc = {}
         js = request.get_json()
         exec(js['code'].replace("\\n", "\n"), {}, loc)
-        backend = FakeProvider().get_backend("fake_"+js.get('backend'))
+        backend = FakeProvider().get_backend("fake_"+js.get('system'))
         layouts = ['noise_adaptive', 'dense', 'trivial']
         routings = ['stochastic', 'basic']
         optlvls = range(4)
@@ -114,7 +114,7 @@ def simu():
         loc = {}
         js = request.get_json()
         exec(js['code'].replace("\\n", "\n"), {}, loc)
-        backend = Aer.get_backend(js.get('backend'))
+        backend = Aer.get_backend(js.get('system'))
         shots = js.get('shots')
         result = execute(loc['qc'], backend, shots=shots).result()
         return {"probability": result.get_counts()}
@@ -127,11 +127,12 @@ def trans():
         loc = {}
         js = request.get_json()
         exec(js['code'].replace("\\n", "\n"), {}, loc)
-        backend = js.get('backend')
-        layout_method = js.get('layout_method')
-        routing_method = js.get('routing_method')
-        scheduling_method = js.get('scheduling_method')
-        qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout_method, routing_method=routing_method, scheduling_method=scheduling_method)
+        backend = FakeProvider().get_backend("fake_"+js.get('system'))
+        layout = js.get('layout')
+        routing = js.get('routing')
+        scheduling = js.get('scheduling')
+        optlvl = js.get('optlvl')
+        qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
         return {"pic": mpl2base64(qcTrans.draw('mpl'))}
     except Exception as e:
         return str(e), 400
