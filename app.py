@@ -68,7 +68,7 @@ def toQasm():
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
         return {"code": str(loc.get('qc').qasm())}
     except Exception as e:
-        return str(e), 400
+        return {"error": str(e)}, 400
 
 @app.route("/qiskit_draw", methods=["POST"])
 def qiskit_draw():
@@ -78,7 +78,7 @@ def qiskit_draw():
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
         return {"pic": mpl2base64(loc.get('qc').draw('mpl'))}
     except Exception as e:
-        return str(e), 400
+        return {"error": str(e)}, 400
 
 @app.route("/recommend", methods=["POST"])
 def rec():
@@ -109,7 +109,7 @@ def rec():
                         res.append({'optlvl': optlvl, 'layout': layout, 'routing': routing, 'scheduling': scheduling, 'acc_err': acc_err/100})
         return json.dumps(sorted(res, key = lambda i: i['acc_err']))
     except Exception as e:
-        return str(e), 400
+        return {"error": str(e)}, 400
 
 @app.route("/simulation", methods=["POST"])
 def simu():
@@ -120,9 +120,9 @@ def simu():
         backend = Aer.get_backend(js.get('system'))
         shots = js.get('shots')
         result = execute(loc.get('qc'), backend, shots=shots).result()
-        return {"probability": result.get_counts()}
+        return {"result": result.get_counts()}
     except Exception as e:
-        return str(e), 400
+        return {"error": str(e)}, 400
 
 @app.route("/transpile", methods=["POST"])
 def trans():
@@ -138,7 +138,7 @@ def trans():
         qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
         return {"pic": mpl2base64(qcTrans.draw('mpl', idle_wires=False, fold=-1))}
     except Exception as e:
-        return str(e), 400
+        return {"error": str(e)}, 400
 
 @app.route("/get_backend", methods=["POST"])
 def getBackend():
@@ -153,7 +153,7 @@ def getBackend():
     try:
         return {"backend":[str(i) for i in provider.backends()]}
     except Exception as e:
-        return str(e), 400
+        return {"error": str(e)}, 400
 
 @app.route("/run", methods=["POST"])
 def runOnReal():
@@ -183,7 +183,7 @@ def runOnReal():
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
         return Response(stream_with_context(generate()))
     except Exception as e:
-        return str(e), 400
+        return {"error": str(e)}, 400
 
 if __name__ == "__main__":
     app.run(debug=True)
