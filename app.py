@@ -1,9 +1,12 @@
-from flask import request, Flask
+import time
+from flask import request, Flask, stream_with_context, Response
 from flask_cors import CORS
 from qiskit import IBMQ, transpile, Aer, execute
 from collections import defaultdict
 from qiskit.test.mock import FakeProvider
+from qiskit.tools.monitor import job_monitor
 import io, base64, re, json
+
 
 app = Flask(__name__)
 CORS(app)
@@ -23,7 +26,6 @@ def get_error(gate):
 def get_errors(backend):
     NAME_EXTRACTOR = re.compile(r'^([a-z]+)(.*)')
 
-    configs = backend.configuration()
     props = backend.properties()
 
     gates_errors = defaultdict(list)
@@ -63,8 +65,8 @@ def toQasm():
     try:
         loc = {}
         js = request.get_json()
-        exec(js['code'].replace("\\n", "\n"), {}, loc)
-        return {"code": str(loc['qc'].qasm())}
+        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        return {"code": str(loc.get('qc').qasm())}
     except Exception as e:
         return str(e), 400
 
@@ -73,8 +75,8 @@ def qiskit_draw():
     try:
         loc = {}
         js = request.get_json()
-        exec(js['code'].replace("\\n", "\n"), {}, loc)
-        return {"pic": mpl2base64(loc['qc'].draw('mpl'))}
+        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        return {"pic": mpl2base64(loc.get('qc').draw('mpl'))}
     except Exception as e:
         return str(e), 400
 
@@ -83,7 +85,7 @@ def rec():
     try:
         loc = {}
         js = request.get_json()
-        exec(js['code'].replace("\\n", "\n"), {}, loc)
+        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
         backend = FakeProvider().get_backend("fake_"+js.get('system'))
         layouts = ['noise_adaptive', 'dense', 'trivial']
         routings = ['stochastic', 'basic']
@@ -97,7 +99,7 @@ def rec():
                     for scheduling in schedulings:
                         qcAmount = {}
                         gateWithAmount = {}
-                        qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
+                        qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
                         for name, amount in qcTrans.count_ops().items():
                             qcAmount[name] = amount
                         for name, _ in gates_errors.items():
@@ -105,8 +107,7 @@ def rec():
                                 gateWithAmount[name] = qcAmount.get(name, 0)
                         acc_err = calc_error(gateWithAmount, gates_errors)
                         res.append({'optlvl': optlvl, 'layout': layout, 'routing': routing, 'scheduling': scheduling, 'acc_err': acc_err/100})
-        res = sorted(res, key = lambda i: i['acc_err'])
-        return json.dumps(res)
+        return json.dumps(sorted(res, key = lambda i: i['acc_err']))
     except Exception as e:
         return str(e), 400
 
@@ -115,10 +116,10 @@ def simu():
     try:
         loc = {}
         js = request.get_json()
-        exec(js['code'].replace("\\n", "\n"), {}, loc)
+        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
         backend = Aer.get_backend(js.get('system'))
         shots = js.get('shots')
-        result = execute(loc['qc'], backend, shots=shots).result()
+        result = execute(loc.get('qc'), backend, shots=shots).result()
         return {"probability": result.get_counts()}
     except Exception as e:
         return str(e), 400
@@ -128,13 +129,13 @@ def trans():
     try:
         loc = {}
         js = request.get_json()
-        exec(js['code'].replace("\\n", "\n"), {}, loc)
+        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
         backend = FakeProvider().get_backend("fake_"+js.get('system'))
         layout = js.get('layout')
         routing = js.get('routing')
         scheduling = js.get('scheduling')
         optlvl = js.get('optlvl')
-        qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
+        qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
         return {"pic": mpl2base64(qcTrans.draw('mpl', idle_wires=False, fold=-1))}
     except Exception as e:
         return str(e), 400
@@ -152,29 +153,33 @@ def getBackend():
     except Exception as e:
         return str(e), 400
 
-@app.route("/getAccount", methods=["GET"])
-def getAcc():
-    try:
-        return {"message": IBMQ.active_account()}
-    except Exception as e:
-        return str(e), 400
+@app.route("/run", methods=["POST"])
+def runOnReal():
+    def generate():
+        device = provider.get_backend(js.get('system'))
+        job = execute(loc.get('qc'), backend = device,shots = js.get('shots'))
+        status = job.status()
+        while status.name not in ["DONE", "CANCELLED", "ERROR"]:
+            msg = status.value
+            if status.name == "QUEUED":
+                msg += " (%s)" % job.queue_position()
+            yield msg
+            time.sleep(5)
+            status = job.status()
+        device_result = job.result()
+        yield str(device_result.get_counts(loc.get('qc')))
 
-@app.route("/deleteAccount", methods=["POST"])
-def delAcc():
     try:
         js = request.get_json()
-        if IBMQ.active_account() == None:
-            msg = "No active account."
-            code = 401
-        elif IBMQ.active_account().get('token') != js.get('api_key'):
-            msg = "Token not match."
-            code = 401
-        else:
-            IBMQ.disable_account()
-            IBMQ.delete_account()
-            msg = "Delete successfully."
-            code = 200
-        return {"message": msg}, code
+        if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
+            IBMQ.save_account(js.get("api_key"), overwrite=True)
+    except Exception as e:
+        return f"Unauthorized key. Login failed. ({e})", 400
+    try:
+        loc = {}
+        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        provider = IBMQ.enable_account(js.get('api_key'))
+        return Response(stream_with_context(generate()))
     except Exception as e:
         return str(e), 400
 
