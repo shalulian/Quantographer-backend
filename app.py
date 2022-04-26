@@ -65,7 +65,7 @@ def toQasm():
     try:
         loc = {}
         js = request.get_json()
-        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        exec(js.get('code').replace("\\n", "\n"), {}, loc)
         return {"code": str(loc.get('qc').qasm())}
     except Exception as e:
         return str(e), 400
@@ -75,7 +75,7 @@ def qiskit_draw():
     try:
         loc = {}
         js = request.get_json()
-        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        exec(js.get('code').replace("\\n", "\n"), {}, loc)
         return {"pic": mpl2base64(loc.get('qc').draw('mpl'))}
     except Exception as e:
         return str(e), 400
@@ -85,7 +85,7 @@ def rec():
     try:
         loc = {}
         js = request.get_json()
-        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        exec(js.get('code').replace("\\n", "\n"), {}, loc)
         backend = FakeProvider().get_backend("fake_"+js.get('system'))
         layouts = ['noise_adaptive', 'dense', 'trivial']
         routings = ['stochastic', 'basic']
@@ -116,7 +116,7 @@ def simu():
     try:
         loc = {}
         js = request.get_json()
-        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        exec(js.get('code').replace("\\n", "\n"), {}, loc)
         backend = Aer.get_backend(js.get('system'))
         shots = js.get('shots')
         result = execute(loc.get('qc'), backend, shots=shots).result()
@@ -129,7 +129,7 @@ def trans():
     try:
         loc = {}
         js = request.get_json()
-        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        exec(js.get('code').replace("\\n", "\n"), {}, loc)
         backend = FakeProvider().get_backend("fake_"+js.get('system'))
         layout = js.get('layout')
         routing = js.get('routing')
@@ -180,7 +180,7 @@ def runOnReal():
         return f"Unauthorized key. Login failed. ({e})", 400
     try:
         loc = {}
-        exec(json.loads('"'+js.get('code')+'"'), {}, loc)
+        exec(js.get('code').replace("\\n", "\n"), {}, loc)
         return Response(stream_with_context(generate()))
     except Exception as e:
         return str(e), 400
