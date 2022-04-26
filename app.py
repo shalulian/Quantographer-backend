@@ -135,7 +135,7 @@ def trans():
         scheduling = js.get('scheduling')
         optlvl = js.get('optlvl')
         qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
-        return {"pic": mpl2base64(qcTrans.draw('mpl'))}
+        return {"pic": mpl2base64(qcTrans.draw('mpl', idle_wires=False, fold=-1))}
     except Exception as e:
         return str(e), 400
 
