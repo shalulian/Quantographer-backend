@@ -145,7 +145,9 @@ def getBackend():
     js = request.get_json()
     try:
         IBMQ.save_account(js.get("api_key"), overwrite=True)
-        provider = IBMQ.enable_account(js.get('api_key'))
+        if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
+            IBMQ.save_account(js.get("api_key"), overwrite=True)
+            provider = IBMQ.enable_account(js.get('api_key'))
     except:
         return "Unauthorized key. Login failed.", 400
     try:
@@ -173,12 +175,12 @@ def runOnReal():
         js = request.get_json()
         if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
             IBMQ.save_account(js.get("api_key"), overwrite=True)
+            provider = IBMQ.enable_account(js.get('api_key'))
     except Exception as e:
         return f"Unauthorized key. Login failed. ({e})", 400
     try:
         loc = {}
         exec(json.loads('"'+js.get('code')+'"'), {}, loc)
-        provider = IBMQ.enable_account(js.get('api_key'))
         return Response(stream_with_context(generate()))
     except Exception as e:
         return str(e), 400
