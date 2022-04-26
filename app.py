@@ -139,14 +139,16 @@ def trans():
     except Exception as e:
         return str(e), 400
 
-@app.route("/setAccount", methods=["POST"])
-def setAcc():
+@app.route("/get_backend", methods=["POST"])
+def getBackend():
+    js = request.get_json()
     try:
-        js = request.get_json()
-        if IBMQ.active_account() == None or js.get("api_key") != IBMQ.active_account().get("token"):
-            print(IBMQ.save_account(js.get("api_key"), overwrite=True))
-        IBMQ.load_account()
-        return {"message": "Set account successfully."}
+        IBMQ.save_account(js.get("api_key"), overwrite=True)
+        provider = IBMQ.enable_account(js.get('api_key'))
+    except:
+        return "Unauthorized key. Login failed.", 400
+    try:
+        return {"backend":[str(i) for i in provider.backends()]}
     except Exception as e:
         return str(e), 400
 
