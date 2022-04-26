@@ -87,22 +87,24 @@ def rec():
         backend = FakeProvider().get_backend("fake_"+js.get('system'))
         layouts = ['noise_adaptive', 'dense', 'trivial']
         routings = ['stochastic', 'basic']
+        schedulings = [None, 'as_soon_as_possible', 'as_late_as_possible']
         optlvls = range(4)
         gates_errors = get_errors(backend)
         res = []
         for layout in layouts:
             for routing in routings:
                 for optlvl in optlvls:
-                    qcAmount = {}
-                    gateWithAmount = {}
-                    qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout, routing_method=routing, optimization_level=optlvl)
-                    for name, amount in qcTrans.count_ops().items():
-                        qcAmount[name] = amount
-                    for name, _ in gates_errors.items():
-                        if name not in ['id', 'reset']:
-                            gateWithAmount[name] = qcAmount.get(name, 0)
-                    acc_err = calc_error(gateWithAmount, gates_errors)
-                    res.append({'optlvl': optlvl, 'layout': layout, 'routing': routing, 'acc_err': acc_err/100})
+                    for scheduling in schedulings:
+                        qcAmount = {}
+                        gateWithAmount = {}
+                        qcTrans = transpile(loc['qc'], backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
+                        for name, amount in qcTrans.count_ops().items():
+                            qcAmount[name] = amount
+                        for name, _ in gates_errors.items():
+                            if name not in ['id', 'reset']:
+                                gateWithAmount[name] = qcAmount.get(name, 0)
+                        acc_err = calc_error(gateWithAmount, gates_errors)
+                        res.append({'optlvl': optlvl, 'layout': layout, 'routing': routing, 'scheduling': scheduling, 'acc_err': acc_err/100})
         res = sorted(res, key = lambda i: i['acc_err'])
         return json.dumps(res)
     except Exception as e:
