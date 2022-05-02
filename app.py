@@ -112,9 +112,11 @@ def rec():
                     gates_errors = get_errors(backend)
                     qcAmount = {}
                     gateWithAmount = {}
+                    errs = {}
                     try:
                         qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, optimization_level=optlvl)
-                    except:
+                    except Exception as e:
+                        errs[str(backend)] = str(e)
                         continue
                     for name, amount in qcTrans.count_ops().items():
                         qcAmount[name] = amount
@@ -123,7 +125,7 @@ def rec():
                             gateWithAmount[name] = qcAmount.get(name, 0)
                     acc_err = calc_error(gateWithAmount, gates_errors)
                     res.append({'system':str(backend), 'optlvl': optlvl, 'layout': layout, 'routing': routing, 'acc_err': acc_err/100})
-        return json.dumps(sorted(res, key = lambda i: i['acc_err']))
+        return json.dumps(sorted(res, key = lambda i: i['acc_err'])) if res != [] else errs
     except Exception as e:
         return {"error": str(e)}, 400
 
