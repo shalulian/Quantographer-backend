@@ -7,7 +7,6 @@ from qiskit.test.mock import FakeProvider
 from qiskit.tools.monitor import job_monitor
 import io, base64, re, json
 
-
 app = Flask(__name__)
 CORS(app)
 
@@ -40,13 +39,7 @@ def get_errors(backend):
 
     return gates_errors
 
-DEFAULT_ERRORS = {
-  'cx': 1.327e-2, 
-  'sx': 3.770e-4, 
-  'x': 3.770e-4
-}
-
-def calc_error(ops_dict, error_dict=DEFAULT_ERRORS):
+def calc_error(ops_dict, error_dict):
   p_not_errors = 1.0
   for gate_name, amount in ops_dict.items():
     try:
@@ -80,37 +73,6 @@ def qiskit_draw():
     except Exception as e:
         return {"error": str(e)}, 400
 
-@app.route("/recommend", methods=["POST"])
-def rec():
-    try:
-        loc = {}
-        js = request.get_json()
-        exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        backend = FakeProvider().get_backend("fake_"+js.get('system'))
-        layouts = ['noise_adaptive', 'dense', 'trivial']
-        routings = ['stochastic', 'basic']
-        schedulings = [None, 'as_soon_as_possible', 'as_late_as_possible']
-        optlvls = range(4)
-        gates_errors = get_errors(backend)
-        res = []
-        for layout in layouts:
-            for routing in routings:
-                for optlvl in optlvls:
-                    for scheduling in schedulings:
-                        qcAmount = {}
-                        gateWithAmount = {}
-                        qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
-                        for name, amount in qcTrans.count_ops().items():
-                            qcAmount[name] = amount
-                        for name, _ in gates_errors.items():
-                            if name not in ['id', 'reset']:
-                                gateWithAmount[name] = qcAmount.get(name, 0)
-                        acc_err = calc_error(gateWithAmount, gates_errors)
-                        res.append({'optlvl': optlvl, 'layout': layout, 'routing': routing, 'scheduling': scheduling, 'acc_err': acc_err/100})
-        return json.dumps(sorted(res, key = lambda i: i['acc_err']))
-    except Exception as e:
-        return {"error": str(e)}, 400
-
 @app.route("/simulation", methods=["POST"])
 def simu():
     try:
@@ -121,6 +83,47 @@ def simu():
         shots = js.get('shots')
         result = execute(loc.get('qc'), backend, shots=shots).result()
         return {"result": result.get_counts()}
+    except Exception as e:
+        return {"error": str(e)}, 400
+
+@app.route("/recommend", methods=["POST"])
+def rec():
+    try:
+        loc = {}
+        js = request.get_json()
+        try:
+            if IBMQ.active_account() != None:
+                IBMQ.disable_account()
+            provider = IBMQ.enable_account(js.get('api_key'))
+        except Exception as e:
+            return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
+        exec(js.get('code').replace("\\n", "\n"), {}, loc)
+        layoutsAndRoutings = [{'noise_adaptive', 'stochastic'}, {'noise_adaptive', 'basic'}, {'trivial', 'basic'}]
+        optlvls = range(4)
+        res = []
+        backends = {}
+        for b in provider.backends():
+            backends[b] = len(b.properties().qubits) if b.properties() != None else 0
+        for layout, routing in layoutsAndRoutings:
+            for optlvl in optlvls:
+                for backend in backends:
+                    if loc.get('qc').num_qubits > backends[backend]:
+                        continue
+                    gates_errors = get_errors(backend)
+                    qcAmount = {}
+                    gateWithAmount = {}
+                    try:
+                        qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, optimization_level=optlvl)
+                    except:
+                        continue
+                    for name, amount in qcTrans.count_ops().items():
+                        qcAmount[name] = amount
+                    for name, _ in gates_errors.items():
+                        if name not in ['id', 'reset']:
+                            gateWithAmount[name] = qcAmount.get(name, 0)
+                    acc_err = calc_error(gateWithAmount, gates_errors)
+                    res.append({'system':str(backend), 'optlvl': optlvl, 'layout': layout, 'routing': routing, 'acc_err': acc_err/100})
+        return json.dumps(sorted(res, key = lambda i: i['acc_err']))
     except Exception as e:
         return {"error": str(e)}, 400
 
@@ -144,12 +147,12 @@ def trans():
 def getBackend():
     js = request.get_json()
     try:
-        IBMQ.save_account(js.get("api_key"), overwrite=True)
-        if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
-            IBMQ.save_account(js.get("api_key"), overwrite=True)
-            provider = IBMQ.enable_account(js.get('api_key'))
+        # if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
+        if IBMQ.active_account() != None:
+            IBMQ.disable_account()
+        provider = IBMQ.enable_account(js.get('api_key'))
     except:
-        return "Unauthorized key. Login failed.", 400
+        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
         return {"backend":[str(i) for i in provider.backends()]}
     except Exception as e:
@@ -171,13 +174,13 @@ def runOnReal():
         device_result = job.result()
         yield str(device_result.get_counts(loc.get('qc')))
 
+    js = request.get_json()
     try:
-        js = request.get_json()
-        if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
-            IBMQ.save_account(js.get("api_key"), overwrite=True)
-            provider = IBMQ.enable_account(js.get('api_key'))
+        if IBMQ.active_account() != None:
+            IBMQ.disable_account()
+        provider = IBMQ.enable_account(js.get('api_key'))
     except Exception as e:
-        return f"Unauthorized key. Login failed. ({e})", 400
+        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
         loc = {}
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
