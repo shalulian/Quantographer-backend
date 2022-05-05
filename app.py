@@ -178,9 +178,13 @@ def runOnReal(ws):
         return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
         loc = {}
+        print("code")
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
+        print("get backend")
         device = provider.get_backend(js.get('system'))
+        print("transpile")
         qcTran = transpile(loc.get('qc'), backend=device, layout_method=js.get('layout'), routing_method=js.get('routing'), scheduling_method=js.get('scheduling'), optimization_level=js.get('optlvl'))
+        print("execute")
         job = execute(qcTran, backend=device,shots=js.get('shots', 1000))
         print("executed")
         status = job.status()
