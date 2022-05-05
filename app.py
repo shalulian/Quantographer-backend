@@ -1,14 +1,15 @@
 import time
-from flask import request, Flask, stream_with_context, Response
+from flask import request, Flask
 from flask_cors import CORS
+from flask_sock import Sock
 from qiskit import IBMQ, transpile, Aer, execute
 from collections import defaultdict
 from qiskit.test.mock import FakeProvider
-from qiskit.tools.monitor import job_monitor
 import io, base64, re, json
 
 app = Flask(__name__)
 CORS(app)
+sock = Sock(app)
 
 def mpl2base64(mpl):
     s = io.BytesIO()
@@ -54,35 +55,35 @@ def calc_error(ops_dict, error_dict):
   return (1.0 - p_not_errors)*10000
 
 @app.route("/qasm", methods=["POST"])
-def toQasm():
+def toQasm(get = None):
     try:
         loc = {}
-        js = request.get_json()
+        js = request.get_json() if get == None else get
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        return {"code": str(loc.get('qc').qasm())}
+        return {"code": str(loc.get('qc').qasm())} if get == None else str(loc.get('qc').qasm())
     except Exception as e:
         return {"error": str(e)}, 400
 
 @app.route("/qiskit_draw", methods=["POST"])
-def qiskit_draw():
+def qiskit_draw(get = None):
     try:
         loc = {}
-        js = request.get_json()
+        js = request.get_json() if get == None else get
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        return {"pic": mpl2base64(loc.get('qc').draw('mpl'))}
+        return {"pic": mpl2base64(loc.get('qc').draw('mpl'))} if get == None else mpl2base64(loc.get('qc').draw('mpl'))
     except Exception as e:
         return {"error": str(e)}, 400
 
 @app.route("/simulation", methods=["POST"])
-def simu():
+def simu(get = None):
     try:
         loc = {}
-        js = request.get_json()
+        js = request.get_json() if get == None else get
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
         backend = Aer.get_backend(js.get('system'))
         shots = js.get('shots')
         result = execute(loc.get('qc'), backend, shots=shots).result()
-        return {"result": result.get_counts()}
+        return {"result": result.get_counts()} if get == None else result.get_counts()
     except Exception as e:
         return {"error": str(e)}, 400
 
@@ -132,24 +133,24 @@ def rec(get = None):
         return {"error": str(e)}, 400
 
 @app.route("/transpile", methods=["POST"])
-def trans():
+def trans(get = None):
     try:
         loc = {}
-        js = request.get_json()
+        js = request.get_json() if get == None else get
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
         backend = FakeProvider().get_backend("fake_"+js.get('system'))
         layout = js.get('layout')
         routing = js.get('routing')
         scheduling = js.get('scheduling')
         optlvl = js.get('optlvl')
-        qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
-        return {"pic": mpl2base64(qcTrans.draw('mpl', idle_wires=False, fold=-1))}
+        qcTran = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
+        return {"pic": mpl2base64(qcTran.draw('mpl', idle_wires=False, fold=-1))} if get == None else mpl2base64(qcTran.draw('mpl', idle_wires=False, fold=-1))
     except Exception as e:
         return {"error": str(e)}, 400
 
 @app.route("/get_backend", methods=["POST"])
-def getBackend():
-    js = request.get_json()
+def getBackend(get = None):
+    js = request.get_json() if get == None else get
     try:
         # if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
         if IBMQ.active_account() != None:
@@ -158,38 +159,42 @@ def getBackend():
     except:
         return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
-        return {"backend":[str(i) for i in provider.backends()]}
+        return {"backend":[str(i) for i in provider.backends()]} if get == None else [str(i) for i in provider.backends()]
     except Exception as e:
         return {"error": str(e)}, 400
 
-@app.route("/run", methods=["POST"])
-def runOnReal():
-    def generate():
-        device = provider.get_backend(js.get('system'))
-        job = execute(loc.get('qc'), backend = device,shots = js.get('shots'))
-        status = job.status()
-        while status.name not in ["DONE", "CANCELLED", "ERROR"]:
-            msg = status.value
-            if status.name == "QUEUED":
-                msg += " (%s)" % job.queue_position()
-            yield msg
-            time.sleep(5)
-            status = job.status()
-        device_result = job.result()
-        yield str(device_result.get_counts(loc.get('qc')))
-
-    js = request.get_json()
+@sock.route("/run")
+def runOnReal(ws):
+    # js = request.get_json()
     try:
+        js = json.loads(ws.receive())
         if IBMQ.active_account() != None:
             IBMQ.disable_account()
         provider = IBMQ.enable_account(js.get('api_key'))
     except Exception as e:
+        ws.send({"error": f"Unauthorized key. Login failed. ({e})", "status": "ERROR"})
+        ws.close()
         return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
         loc = {}
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        return Response(stream_with_context(generate()))
+        device = provider.get_backend(js.get('system'))
+        qcTran = transpile(loc.get('qc'), backend=device, layout_method=js.get('layout'), routing_method=js.get('routing'), scheduling_method=js.get('scheduling'), optimization_level=js.get('optlvl'))
+        job = execute(qcTran, backend=device,shots=js.get('shots', 1000))
+        status = job.status()
+        while status.name not in ["DONE", "CANCELLED", "ERROR"]:
+            msg = {"status": status.name}
+            if status.name == "QUEUED":
+                msg["queue"] = job.queue_position()
+            ws.send(msg)
+            time.sleep(5)
+            status = job.status()
+        device_result = job.result()
+        ws.send({"status": job.status().name, "value": device_result.get_counts(loc.get('qc'))})
+        ws.close()
     except Exception as e:
+        ws.send({"error": str(e), "status": "ERROR"})
+        ws.close()
         return {"error": str(e)}, 400
 
 if __name__ == "__main__":
