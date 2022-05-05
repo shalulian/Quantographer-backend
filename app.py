@@ -212,9 +212,12 @@ def runOnReal(ws):
 
 @app.route("/sleepyunicorngetdrunk")
 def test():
-    print("i show timeeeee")
-    time.sleep(300)
-    return "u high"
+    def generate():
+        endtime = time.time() + 300
+        while time.time() < endtime:
+            yield "olo\n"
+            time.sleep(5)
+    return app.response_class(generate())
 
 if __name__ == "__main__":
     app.run(debug=True)
