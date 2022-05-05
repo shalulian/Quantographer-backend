@@ -194,7 +194,10 @@ def runOnReal(ws):
             if status.name == "QUEUED":
                 msg["queue"] = job.queue_position()
             ws.send(msg)
-            time.sleep(5)
+            if status.name == "RUNNING":
+                time.sleep(2)
+            else:
+                time.sleep(5)
             status = job.status()
         print("get result")
         device_result = job.result()
