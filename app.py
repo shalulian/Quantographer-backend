@@ -87,10 +87,10 @@ def simu():
         return {"error": str(e)}, 400
 
 @app.route("/recommend", methods=["POST"])
-def rec():
+def rec(get = None):
     try:
         loc = {}
-        js = request.get_json()
+        js = request.get_json() if get == None else get
         try:
             if IBMQ.active_account() != None:
                 IBMQ.disable_account()
@@ -102,6 +102,7 @@ def rec():
         optlvls = range(4)
         res = []
         backends = {}
+        errs = {}
         for b in provider.backends():
             backends[b] = len(b.properties().qubits) if b.properties() != None else 0
         for layout, routing in layoutsAndRoutings:
@@ -112,7 +113,6 @@ def rec():
                     gates_errors = get_errors(backend)
                     qcAmount = {}
                     gateWithAmount = {}
-                    errs = {}
                     try:
                         qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, optimization_level=optlvl)
                     except Exception as e:
@@ -125,7 +125,9 @@ def rec():
                             gateWithAmount[name] = qcAmount.get(name, 0)
                     acc_err = calc_error(gateWithAmount, gates_errors)
                     res.append({'system':str(backend), 'optlvl': optlvl, 'layout': layout, 'routing': routing, 'acc_err': acc_err/100})
-        return json.dumps(sorted(res, key = lambda i: i['acc_err'])) if res != [] else errs
+        if res == []:
+            return errs, 400
+        return json.dumps(sorted(res, key = lambda i: i['acc_err'])) if get == None else sorted(res, key = lambda i: i['acc_err'])
     except Exception as e:
         return {"error": str(e)}, 400
 
