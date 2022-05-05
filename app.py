@@ -210,5 +210,11 @@ def runOnReal(ws):
         ws.close()
         return {"error": str(e)}, 400
 
+@app.route("/sleepyunicorngetdrunk")
+def test():
+    print("i show timeeeee")
+    time.sleep(300)
+    return "u high"
+
 if __name__ == "__main__":
     app.run(debug=True)
