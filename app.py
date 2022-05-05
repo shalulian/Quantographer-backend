@@ -171,6 +171,7 @@ def runOnReal(ws):
         if IBMQ.active_account() != None:
             IBMQ.disable_account()
         provider = IBMQ.enable_account(js.get('api_key'))
+        print("logined")
     except Exception as e:
         ws.send({"error": f"Unauthorized key. Login failed. ({e})", "status": "ERROR"})
         ws.close()
@@ -181,16 +182,21 @@ def runOnReal(ws):
         device = provider.get_backend(js.get('system'))
         qcTran = transpile(loc.get('qc'), backend=device, layout_method=js.get('layout'), routing_method=js.get('routing'), scheduling_method=js.get('scheduling'), optimization_level=js.get('optlvl'))
         job = execute(qcTran, backend=device,shots=js.get('shots', 1000))
+        print("executed")
         status = job.status()
         while status.name not in ["DONE", "CANCELLED", "ERROR"]:
+            print(status.name)
             msg = {"status": status.name}
             if status.name == "QUEUED":
                 msg["queue"] = job.queue_position()
             ws.send(msg)
             time.sleep(5)
             status = job.status()
+        print("get result")
         device_result = job.result()
+        print("print result")
         ws.send({"status": job.status().name, "value": device_result.get_counts(loc.get('qc'))})
+        print("end")
         ws.close()
     except Exception as e:
         ws.send({"error": str(e), "status": "ERROR"})
