@@ -210,14 +210,14 @@ def runOnReal(ws):
         ws.close()
         return {"error": str(e)}, 400
 
-@sock.route("/sleepyunicorngetdrunk")
-def test(ws):
-    ws.send("hi honey")
-    i = 0
-    while True:
-        i = i+1
-        ws.send(f"olo {i}")
-        time.sleep(5)
+# @sock.route("/sleepyunicorngetdrunk")
+# def test(ws):
+#     ws.send("hi honey")
+#     i = 0
+#     while True:
+#         i += 1
+#         time.sleep(5)
+#         ws.send(f"olo {i}")
 
 if __name__ == "__main__":
     app.run(debug=True)
