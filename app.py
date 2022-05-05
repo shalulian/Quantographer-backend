@@ -210,14 +210,14 @@ def runOnReal(ws):
         ws.close()
         return {"error": str(e)}, 400
 
-@app.route("/sleepyunicorngetdrunk")
-def test():
-    def generate():
-        endtime = time.time() + 300
-        while time.time() < endtime:
-            yield "olo\n"
-            time.sleep(5)
-    return app.response_class(generate())
+@sock.route("/sleepyunicorngetdrunk")
+def test(ws):
+    ws.send("hi honey")
+    endtime = time.time() + 300
+    while time.time() < endtime:
+        ws.send("olo")
+        time.sleep(5)
+    print("do ne")
 
 if __name__ == "__main__":
     app.run(debug=True)
