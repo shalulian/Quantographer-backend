@@ -213,11 +213,11 @@ def runOnReal(ws):
 @sock.route("/sleepyunicorngetdrunk")
 def test(ws):
     ws.send("hi honey")
-    endtime = time.time() + 300
-    while time.time() < endtime:
-        ws.send("olo")
+    i = 0
+    while True:
+        i = i+1
+        ws.send(f"olo {i}")
         time.sleep(5)
-    print("do ne")
 
 if __name__ == "__main__":
     app.run(debug=True)
