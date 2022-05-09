@@ -88,23 +88,24 @@ def simu(get = None):
 
 @app.route("/recommend", methods=["POST"])
 def rec(get = None):
+    js = request.get_json() if get == None else get
+    try:
+        if IBMQ.active_account() != None:
+            IBMQ.disable_account()
+        provider = IBMQ.enable_account(js.get('api_key'))
+    except Exception as e:
+        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
         loc = {}
-        js = request.get_json() if get == None else get
-        try:
-            if IBMQ.active_account() != None:
-                IBMQ.disable_account()
-            provider = IBMQ.enable_account(js.get('api_key'))
-        except Exception as e:
-            return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        layoutsAndRoutings = [{'noise_adaptive', 'stochastic'}, {'noise_adaptive', 'basic'}, {'trivial', 'basic'}]
+        layoutsAndRoutings = [('noise_adaptive', 'stochastic'), ('noise_adaptive', 'basic'), ('trivial', 'basic')]
         optlvls = range(4)
         res = []
         backends = {}
-        errs = {}
+        errs = defaultdict(list)
         for b in provider.backends():
-            backends[b] = b.configuration().n_qubits if b.configuration() != None else 0
+            if 'n_qubits' in b.configuration().__dict__.keys():
+                backends[b] = b.configuration().n_qubits
         for layout, routing in layoutsAndRoutings:
             for optlvl in optlvls:
                 for backend in backends:
