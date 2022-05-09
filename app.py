@@ -104,7 +104,7 @@ def rec(get = None):
         backends = {}
         errs = {}
         for b in provider.backends():
-            backends[b] = len(b.properties().qubits) if b.properties() != None else 0
+            backends[b] = b.configuration().n_qubits if b.configuration() != None else 0
         for layout, routing in layoutsAndRoutings:
             for optlvl in optlvls:
                 for backend in backends:
@@ -164,7 +164,17 @@ def getBackend(get = None):
     except:
         return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
-        return {"backend":[str(i) for i in provider.backends()]} if get == None else [str(i) for i in provider.backends()]
+        res = []
+        for b in provider.backends():
+            try:
+                res.append({
+                    "name": str(b),
+                    "qb": b.configuration().n_qubits,
+                    "qv": b.configuration().quantum_volume
+                })
+            except:
+                pass
+        return json.dumps(res) if get == None else json.dumps(res)
     except Exception as e:
         return {"error": str(e)}, 400
 
