@@ -4,7 +4,6 @@ from flask_cors import CORS
 from flask_sock import Sock
 from qiskit import IBMQ, transpile, Aer, execute
 from collections import defaultdict
-from qiskit.test.mock import FakeProvider
 import io, base64, re, json
 
 app = Flask(__name__)
@@ -134,16 +133,22 @@ def rec(get = None):
 
 @app.route("/transpile", methods=["POST"])
 def trans(get = None):
+    js = request.get_json() if get == None else get
+    try:
+        if IBMQ.active_account() != None:
+            IBMQ.disable_account()
+        provider = IBMQ.enable_account(js.get('api_key'))
+    except:
+        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
         loc = {}
-        js = request.get_json() if get == None else get
         exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        backend = FakeProvider().get_backend("fake_"+js.get('system'))
+        device = provider.get_backend(js.get('system'))
         layout = js.get('layout')
         routing = js.get('routing')
         scheduling = js.get('scheduling')
         optlvl = js.get('optlvl')
-        qcTran = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
+        qcTran = transpile(loc.get('qc'), backend=device, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
         return {"pic": mpl2base64(qcTran.draw('mpl', idle_wires=False, fold=-1))} if get == None else mpl2base64(qcTran.draw('mpl', idle_wires=False, fold=-1))
     except Exception as e:
         return {"error": str(e)}, 400
