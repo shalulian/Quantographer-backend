@@ -110,13 +110,16 @@ def rec(get = None):
                 for backend in backends:
                     if loc.get('qc').num_qubits > backends[backend]:
                         continue
-                    gates_errors = get_errors(backend)
+                    try:
+                        gates_errors = get_errors(backend)
+                    except:
+                        continue
                     qcAmount = {}
                     gateWithAmount = {}
                     try:
                         qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, optimization_level=optlvl)
                     except Exception as e:
-                        errs[str(backend)] = str(e)
+                        errs[str(backend)].append(str(e))
                         continue
                     for name, amount in qcTrans.count_ops().items():
                         qcAmount[name] = amount
