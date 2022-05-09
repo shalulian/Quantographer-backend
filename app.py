@@ -166,14 +166,20 @@ def getBackend(get = None):
     try:
         res = []
         for b in provider.backends():
-            try:
-                res.append({
-                    "name": str(b),
-                    "qb": b.configuration().n_qubits,
-                    "qv": b.configuration().quantum_volume
-                })
-            except:
-                pass
+            if 'ibmq' not in str(b):
+                continue
+            qb = None
+            qv = None
+            if 'n_qubits' in b.configuration().__dict__.keys():
+                qb = b.configuration().n_qubits
+            if 'quantum_volume' in b.configuration()._data.keys():
+                qv = b.configuration().quantum_volume
+            res.append({
+                "name": str(b),
+                "qb": qb,
+                "qv": qv
+            })
+                
         return json.dumps(res) if get == None else json.dumps(res)
     except Exception as e:
         return {"error": str(e)}, 400
