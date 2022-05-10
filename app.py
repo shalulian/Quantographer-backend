@@ -198,7 +198,7 @@ def runOnReal(ws):
         provider = IBMQ.enable_account(js.get('api_key'))
         print("logined")
     except Exception as e:
-        ws.send({"error": f"Unauthorized key. Login failed. ({e})", "status": "ERROR"})
+        ws.send(json.dumps({"error": f"Unauthorized key. Login failed. ({e})", "status": "ERROR"}))
         ws.close()
         return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
     try:
@@ -218,7 +218,7 @@ def runOnReal(ws):
             msg = {"status": status.name}
             if status.name == "QUEUED":
                 msg["queue"] = job.queue_position()
-            ws.send(msg)
+            ws.send(json.dumps(msg))
             if status.name == "RUNNING":
                 time.sleep(2)
             else:
@@ -227,11 +227,11 @@ def runOnReal(ws):
         print("get result")
         device_result = job.result()
         print("print result")
-        ws.send({"status": job.status().name, "value": device_result.get_counts(loc.get('qc'))})
+        ws.send(json.dumps({"status": job.status().name, "value": device_result.get_counts(loc.get('qc'))}))
         print("end")
         ws.close()
     except Exception as e:
-        ws.send({"error": str(e), "status": "ERROR"})
+        ws.send(json.dumps({"error": str(e), "status": "ERROR"}))
         ws.close()
         return {"error": str(e)}, 400
 
