@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import time
 from flask import request, Flask
 from flask_cors import CORS
@@ -218,6 +219,8 @@ def runOnReal(ws):
             msg = {"status": status.name}
             if status.name == "QUEUED":
                 msg["queue"] = job.queue_position()
+                if job.queue_info() != None:
+                    msg["timeToStart"] = str(job.queue_info().estimated_start_time - datetime.now(timezone.utc))
             ws.send(json.dumps(msg))
             if status.name == "RUNNING":
                 time.sleep(2)
