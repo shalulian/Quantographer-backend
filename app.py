@@ -227,7 +227,7 @@ def runOnReal(ws):
         print("get result")
         device_result = job.result()
         print("print result")
-        ws.send(json.dumps({"status": job.status().name, "value": device_result.get_counts(loc.get('qc'))}))
+        ws.send(json.dumps({"status": job.status().name, "value": json.dumps(sorted(device_result.get_counts().items()))}))
         print("end")
         ws.close()
     except Exception as e:
