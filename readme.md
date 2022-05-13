@@ -94,7 +94,7 @@
 {
     api_key: "",
     code: "",
-    system, "",
+    system: "",
     layout: "",
     routing: "",
     scheduling: "",
@@ -133,14 +133,24 @@
 ## **/run** (websocket)
 ### input
 - api_key: key to signin to IBMQ account
-- system: system to run
+- system: name of the system
 - code: string of QuantumCircuit code that store in variable *qc*
+- layout: type of layout method
+- routing: type of routing method
+- scheduling: type of scheduling method
+- optlvl: number of optimization level
+- shots: number of shots to execute
 
 ```
 {
     api_key: "",
     system: "",
-    code: ""
+    code: "",
+    layout: "",
+    routing: "",
+    scheduling: "",
+    optlvl: 0,
+    shots: 0
 }
 ```
 ### output
