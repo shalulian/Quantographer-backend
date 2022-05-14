@@ -1,251 +1,341 @@
-from datetime import datetime, timezone
+import json
 import time
-from flask import request, Flask
+
+from datetime import datetime, timezone
+import traceback
+
+from flask import Flask, request
 from flask_cors import CORS
 from flask_sock import Sock
-from qiskit import IBMQ, transpile, Aer, execute
-from collections import defaultdict
-import io, base64, re, json
+
+from qiskit import transpile, execute
+from qiskit.providers.jobstatus import JobStatus
+from qiskit.providers.aer.aerprovider import AerProvider
+from qiskit.providers.ibmq import IBMQFactory, IBMQJob
+
+from util import get_available_backends, get_errors, calc_error, plot_png, to_data_url
 
 app = Flask(__name__)
-CORS(app)
 sock = Sock(app)
 
-def mpl2base64(mpl):
-    s = io.BytesIO()
-    mpl.savefig(s, format='png', bbox_inches="tight")
-    s = base64.b64encode(s.getvalue()).decode("utf-8").replace("\n", "")
-    return "data:image/png;base64,%s" % s
+CORS(app)
 
-def get_error(gate):
-  for param in gate.parameters:
-    if param.name == 'gate_error':
-      return param.value
-  return 0
+CHOSEN_PARAMETERS = [
+    ('noise_adaptive', 'stochastic'),
+    ('noise_adaptive', 'basic'),
+    ('trivial', 'basic')
+]
 
-def get_errors(backend):
-    NAME_EXTRACTOR = re.compile(r'^([a-z]+)(.*)')
+def wrap_response(func):
+    # wrapper function
+    def inner(*args, **kwargs):
+        try:
+            # get result
+            res = func(*args, **kwargs)
 
-    props = backend.properties()
+            # wrap in structure
+            pack = {
+                'status': 'ok',
+                'result': res
+            }
 
-    gates_errors = defaultdict(list)
-    for gate in props.gates:
-        extract_res = NAME_EXTRACTOR.match(gate.name)
-        name, _ = extract_res.groups()
-        error = get_error(gate)
-        gates_errors[name].append(error)
+            return pack, 200
 
-    for gate, errors in gates_errors.items():
-        gates_errors[gate] = sum(errors) / len(errors)
+        except Exception as e:
+            # wrap error in structure
+            err = {
+                'status': 'error',
+                'error': type(e).__name__
+            }
 
-    return gates_errors
+            traceback.print_exc()
 
-def calc_error(ops_dict, error_dict):
-  p_not_errors = 1.0
-  for gate_name, amount in ops_dict.items():
-    try:
-      p_err = error_dict[gate_name]
-    except:
-      # skip unknow error gates
-      pass
-    else:
-      p_not_error = 1.0 - p_err
-      p_not_errors *= p_not_error ** amount
-  # return 1.0 - p_not_errors
-  return (1.0 - p_not_errors)*10000
+            return err, 400
 
-@app.route("/qasm", methods=["POST"])
-def toQasm(get = None):
-    try:
-        loc = {}
-        js = request.get_json() if get == None else get
-        exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        return {"code": str(loc.get('qc').qasm())} if get == None else str(loc.get('qc').qasm())
-    except Exception as e:
-        return {"error": str(e)}, 400
+    # preserve old name
+    inner.__name__ = func.__name__
 
-@app.route("/qiskit_draw", methods=["POST"])
-def qiskit_draw(get = None):
-    try:
-        loc = {}
-        js = request.get_json() if get == None else get
-        exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        return {"pic": mpl2base64(loc.get('qc').draw('mpl'))} if get == None else mpl2base64(loc.get('qc').draw('mpl'))
-    except Exception as e:
-        return {"error": str(e)}, 400
+    return inner
 
-@app.route("/simulation", methods=["POST"])
-def simu(get = None):
-    try:
-        loc = {}
-        js = request.get_json() if get == None else get
-        exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        backend = Aer.get_backend(js.get('system'))
-        shots = js.get('shots')
-        result = execute(loc.get('qc'), backend, shots=shots).result()
-        return {"result": result.get_counts()} if get == None else result.get_counts()
-    except Exception as e:
-        return {"error": str(e)}, 400
+def wrap_ws(func):
+    # wrapper function
+    def inner(ws, *args, **kwargs):
+        try:
+            # get result
+            func(ws, *args, **kwargs)
 
-@app.route("/recommend", methods=["POST"])
-def rec(get = None):
-    js = request.get_json() if get == None else get
-    try:
-        if IBMQ.active_account() != None:
-            IBMQ.disable_account()
-        provider = IBMQ.enable_account(js.get('api_key'))
-    except Exception as e:
-        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
-    try:
-        loc = {}
-        exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        layoutsAndRoutings = [('noise_adaptive', 'stochastic'), ('noise_adaptive', 'basic'), ('trivial', 'basic')]
-        optlvls = range(4)
-        res = []
-        backends = {}
-        errs = defaultdict(list)
-        for b in provider.backends():
-            if 'n_qubits' in b.configuration().__dict__.keys():
-                backends[b] = b.configuration().n_qubits
-        for layout, routing in layoutsAndRoutings:
-            for optlvl in optlvls:
-                for backend in backends:
-                    if loc.get('qc').num_qubits > backends[backend]:
-                        continue
-                    try:
-                        gates_errors = get_errors(backend)
-                    except:
-                        continue
-                    qcAmount = {}
-                    gateWithAmount = {}
-                    try:
-                        qcTrans = transpile(loc.get('qc'), backend=backend, layout_method=layout, routing_method=routing, optimization_level=optlvl)
-                    except Exception as e:
-                        errs[str(backend)].append(str(e))
-                        continue
-                    for name, amount in qcTrans.count_ops().items():
-                        qcAmount[name] = amount
-                    for name, _ in gates_errors.items():
-                        if name not in ['id', 'reset']:
-                            gateWithAmount[name] = qcAmount.get(name, 0)
-                    acc_err = calc_error(gateWithAmount, gates_errors)
-                    res.append({'system':str(backend), 'optlvl': optlvl, 'layout': layout, 'routing': routing, 'acc_err': acc_err/100})
-        if res == []:
-            return errs, 400
-        return json.dumps(sorted(res, key = lambda i: i['acc_err'])) if get == None else sorted(res, key = lambda i: i['acc_err'])
-    except Exception as e:
-        return {"error": str(e)}, 400
+        except Exception as e:
+            # wrap error in structure
+            err_packet = json.dumps(
+                {
+                    'status': 'ERROR',
+                    'error': type(e).__name__
+                }
+            )
 
-@app.route("/transpile", methods=["POST"])
-def trans(get = None):
-    js = request.get_json() if get == None else get
-    try:
-        if IBMQ.active_account() != None:
-            IBMQ.disable_account()
-        provider = IBMQ.enable_account(js.get('api_key'))
-    except:
-        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
-    try:
-        loc = {}
-        exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        device = provider.get_backend(js.get('system'))
-        layout = js.get('layout')
-        routing = js.get('routing')
-        scheduling = js.get('scheduling')
-        optlvl = js.get('optlvl')
-        qcTran = transpile(loc.get('qc'), backend=device, layout_method=layout, routing_method=routing, scheduling_method=scheduling, optimization_level=optlvl)
-        return {"pic": mpl2base64(qcTran.draw('mpl', idle_wires=False, fold=-1))} if get == None else mpl2base64(qcTran.draw('mpl', idle_wires=False, fold=-1))
-    except Exception as e:
-        return {"error": str(e)}, 400
+            ws.send(err_packet)
+            ws.close()
 
-@app.route("/get_backend", methods=["POST"])
-def getBackend(get = None):
-    js = request.get_json() if get == None else get
-    try:
-        # if IBMQ.active_account() == None or IBMQ.active_account().get('token') != js.get('api_key'):
-        if IBMQ.active_account() != None:
-            IBMQ.disable_account()
-        provider = IBMQ.enable_account(js.get('api_key'))
-    except:
-        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
-    try:
-        res = []
-        for b in provider.backends():
-            if 'ibmq' not in str(b):
-                continue
-            qb = None
-            qv = None
-            if 'n_qubits' in b.configuration().__dict__.keys():
-                qb = b.configuration().n_qubits
-            if 'quantum_volume' in b.configuration()._data.keys():
-                qv = b.configuration().quantum_volume
-            res.append({
-                "name": str(b),
-                "qb": qb,
-                "qv": qv
-            })
-                
-        return json.dumps(res) if get == None else json.dumps(res)
-    except Exception as e:
-        return {"error": str(e)}, 400
+            raise
 
-@sock.route("/run")
-def runOnReal(ws):
-    # js = request.get_json()
-    try:
-        js = json.loads(ws.receive())
-        if IBMQ.active_account() != None:
-            IBMQ.disable_account()
-        provider = IBMQ.enable_account(js.get('api_key'))
-        print("logined")
-    except Exception as e:
-        ws.send(json.dumps({"error": f"Unauthorized key. Login failed. ({e})", "status": "ERROR"}))
-        ws.close()
-        return {"error": f"Unauthorized key. Login failed. ({e})"}, 400
-    try:
-        loc = {}
-        print("code")
-        exec(js.get('code').replace("\\n", "\n"), {}, loc)
-        print("get backend")
-        device = provider.get_backend(js.get('system'))
-        print("transpile")
-        qcTran = transpile(loc.get('qc'), backend=device, layout_method=js.get('layout'), routing_method=js.get('routing'), scheduling_method=js.get('scheduling'), optimization_level=js.get('optlvl'))
-        print("execute")
-        job = execute(qcTran, backend=device,shots=js.get('shots', 1000))
-        print("executed")
+    # preserve old name
+    inner.__name__ = func.__name__
+
+    return inner
+
+def exec_circuit(code):
+    glob = {}
+    loc = {}
+
+    exec(code, glob, loc)
+
+    return loc['qc']
+
+
+@app.route('/convert_qasm', methods=['POST'])
+@wrap_response
+def convert_qasm():
+    req = request.get_json()
+    code = req['code']
+
+    circuit = exec_circuit(code)
+    asm = circuit.qasm()
+
+    return f'{asm}'
+
+@app.route('/convert_image', methods=['POST'])
+@wrap_response
+def convert_image():
+    req = request.get_json()
+    code = req['code']
+
+    circuit = exec_circuit(code)
+    plot = circuit.draw('mpl')
+
+    png_bytes = plot_png(plot)
+
+    return to_data_url('image/png', png_bytes)
+
+@app.route('/run_simulation', methods=['POST'])
+@wrap_response
+def run_simulation():
+    req = request.get_json()
+
+    code = req['code']
+    system = req['system']
+    shots = req.get('shots', 1024)
+
+    circuit = exec_circuit(code)
+
+    Aer = AerProvider()
+    backend = Aer.get_backend(system)
+
+    job = execute(circuit, backend, shots=shots)
+
+    res = job.result()
+    counts = res.get_counts()
+
+    return counts
+
+@app.route('/transpile', methods=['POST'])
+@wrap_response
+def transpile_circuit():
+    req = request.get_json()
+
+    key = req['key']
+    code = req['code']
+    system = req['system']
+    level = req['level']
+    layout = req['layout']
+    routing = req['routing']
+    scheduling = req['scheduling']
+
+    IBMQ = IBMQFactory()
+    provider = IBMQ.enable_account(key)
+    backend = provider.get_backend(system)
+
+    circuit = exec_circuit(code)
+
+    transpiled_circuit = transpile(
+        circuit,
+        backend=backend,
+        layout_method=layout,
+        routing_method=routing,
+        scheduling_method=scheduling,
+        optimization_level=level
+    )
+
+    plot = transpiled_circuit.draw('mpl', idle_wires=False, fold=-1)
+    png_bytes = plot_png(plot)
+
+    return to_data_url('image/png', png_bytes)
+
+@app.route('/available_backend', methods=['POST'])
+@wrap_response
+def available_backend():
+    req = request.get_json()
+
+    key = req['key']
+
+    IBMQ = IBMQFactory()
+    provider = IBMQ.enable_account(key)
+
+    backends = get_available_backends(provider)
+    res = list(backends)
+
+    return res
+
+@app.route('/recommend', methods=['POST'])
+@wrap_response
+def recommend_backend():
+    req = request.get_json()
+
+    key = req['key']
+    code = req['code']
+
+    IBMQ = IBMQFactory()
+    provider = IBMQ.enable_account(key)
+
+    circuit = exec_circuit(code)
+
+    res = []
+
+    for backend_brief in get_available_backends(provider, True):
+        if circuit.num_qubits > backend_brief['qb']:
+            # skip backend that smaller than circuit
+            continue
+
+        # get backend object
+        backend = backend_brief['backend']
+        backend_name = backend_brief['name']
+
+        try:
+            gates_errors = get_errors(backend)
+
+        except Exception:
+            # skip backend that can't obtain error
+            continue
+
+        for layout, routing in CHOSEN_PARAMETERS:
+            for level in range(4):
+                try:
+                    transpiled_circuit = transpile(
+                        circuit,
+                        backend=backend,
+                        layout_method=layout,
+                        routing_method=routing,
+                        optimization_level=level
+                    )
+                except:
+                    # skip system that produce error during transpile
+                    continue
+
+                acc_err = calc_error(transpiled_circuit.count_ops(), gates_errors)
+
+                res.append(
+                    {
+                        'system': backend_name,
+                        'level': level,
+                        'layout': layout,
+                        'routing': routing,
+                        'acc_err': acc_err / 100
+                    }
+                )
+
+    return res
+
+@sock.route('/run')
+@wrap_response
+@wrap_ws
+def run_backend(ws):
+    raw = ws.receive()
+    req = json.loads(raw)
+
+    key = req['key']
+    code = req['code']
+    system = req['system']
+    level = req['level']
+    layout = req['layout']
+    routing = req['routing']
+    scheduling = req['scheduling']
+    shots = req.get('shots', 1024)
+
+    IBMQ = IBMQFactory()
+    provider = IBMQ.enable_account(key)
+    backend = provider.get_backend(system)
+
+    circuit = exec_circuit(code)
+
+    transpiled_circuit = transpile(
+        circuit,
+        backend=backend,
+        layout_method=layout,
+        routing_method=routing,
+        scheduling_method=scheduling,
+        optimization_level=level
+    )
+
+    job: IBMQJob = execute(transpiled_circuit, backend=backend, shots=shots)
+
+    while True:
+        # poll status
         status = job.status()
-        while status.name not in ["DONE", "CANCELLED", "ERROR"]:
-            print(status.name)
-            msg = {"status": status.name}
-            if status.name == "QUEUED":
-                msg["queue"] = job.queue_position()
-                if job.queue_info() != None:
-                    msg["timeToStart"] = str(job.queue_info().estimated_start_time - datetime.now(timezone.utc))
-            ws.send(json.dumps(msg))
-            if status.name == "RUNNING":
-                time.sleep(2)
-            else:
-                time.sleep(5)
-            status = job.status()
-        print("get result")
-        device_result = job.result()
-        print("print result")
-        ws.send(json.dumps({"status": job.status().name, "value": sorted(device_result.get_counts().items())}))
-        print("end")
-        ws.close()
-    except Exception as e:
-        ws.send(json.dumps({"error": str(e), "status": "ERROR"}))
-        ws.close()
-        return {"error": str(e)}, 400
 
-# @sock.route("/sleepyunicorngetdrunk")
-# def test(ws):
-#     ws.send("hi honey")
-#     i = 0
-#     while True:
-#         i += 1
-#         time.sleep(5)
-#         ws.send(f"olo {i}")
+        # get enum name
+        kind = status.name
 
-if __name__ == "__main__":
-    app.run(debug=True)
+        report = {
+            'status': kind
+        }
+
+        if status is JobStatus.QUEUED:
+            # get info
+            queue_info = job.queue_info()
+
+            if queue_info:
+                # get value or use fallback value
+                index = queue_info.position
+
+                # get value or use fallback value
+                est_start_time = queue_info.estimated_start_time
+
+                now = datetime.now(timezone.utc)
+
+                # calc elapse
+                est_start_interval = str(est_start_time - now) if est_start_time else None
+
+                # add progress
+                report.update(
+                    {
+                        'queue': index,
+                        'est_time': est_start_interval
+                    }
+                )
+
+        if status is JobStatus.DONE:
+            # get result
+            result = job.result()
+
+            counts = result.get_counts()
+            count_pairs = counts.items()
+
+            # add result
+            report['value'] = list(count_pairs)
+
+        # serialize data
+        raw = json.dumps(report)
+
+        # send data
+        ws.send(raw)
+
+        # end status
+        if status in (JobStatus.DONE, JobStatus.CANCELLED, JobStatus.ERROR):
+            break
+
+        time.sleep(2 if status is JobStatus.RUNNING else 5)
+
+    ws.close()
+
+if __name__ == '__main__':
+    # start dev server if invoke directly
+    app.run()
