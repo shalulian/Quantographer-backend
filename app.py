@@ -2,14 +2,16 @@ import json
 import time
 
 from datetime import datetime, timezone
+import traceback
 
 from flask import Flask, request
 from flask_cors import CORS
 from flask_sock import Sock
 
 from qiskit import transpile, execute
+from qiskit.providers.jobstatus import JobStatus
 from qiskit.providers.aer.aerprovider import AerProvider
-from qiskit.providers.ibmq import IBMQFactory
+from qiskit.providers.ibmq import IBMQFactory, IBMQJob
 
 from util import get_available_backends, get_errors, calc_error, plot_png, to_data_url
 
@@ -68,6 +70,8 @@ def wrap_ws(func):
                     'error': type(e).__name__
                 }
             )
+
+            traceback.print_exc()
 
             ws.send(err_packet)
             ws.close()
@@ -271,36 +275,52 @@ def run_backend(ws):
         optimization_level=level
     )
 
-    job = execute(transpiled_circuit, backend=backend, shots=shots)
+    job: IBMQJob = execute(transpiled_circuit, backend=backend, shots=shots)
 
     while True:
         # poll status
         status = job.status()
 
+        # get enum name
         kind = status.name
-
-        # end status
-        if kind in ['DONE', 'CANCELLED', 'ERROR']:
-            break
 
         report = {
             'status': kind
         }
 
-        if kind == 'QUEUED':
-            queue_index = job.queue_position()
+        if status is JobStatus.QUEUED:
+            # get info
             queue_info = job.queue_info()
 
-            # calc elapse
-            est_time = queue_info.estimated_start_time - datetime.now(timezone.utc)
+            if queue_info:
+                # get value or use fallback value
+                index = queue_info.position
 
-            # add progress
-            report.update(
-                {
-                    'queue': queue_index,
-                    'est_time': str(est_time)
-                }
-            )
+                # get value or use fallback value
+                est_start_time = queue_info.estimated_start_time
+
+                now = datetime.now(timezone.utc)
+
+                # calc elapse
+                est_start_interval = str(est_start_time - now) if est_start_time else None
+
+                # add progress
+                report.update(
+                    {
+                        'queue': index,
+                        'est_time': est_start_interval
+                    }
+                )
+
+        if status is JobStatus.DONE:
+            # get result
+            result = job.result()
+
+            counts = result.get_counts()
+            count_pairs = counts.items()
+
+            # add result
+            report['value'] = list(count_pairs)
 
         # serialize data
         raw = json.dumps(report)
@@ -308,23 +328,14 @@ def run_backend(ws):
         # send data
         ws.send(raw)
 
-        time.sleep(2 if kind == 'RUNNING' else 5)
+        # end status
+        if status in (JobStatus.DONE, JobStatus.CANCELLED, JobStatus.ERROR):
+            break
 
-    result = job.result()
-
-    counts = result.get_counts()
-    count_pairs = counts.items()
-
-    ws.send(
-        json.dumps(
-            {
-                'status': kind,
-                'value': list(count_pairs)
-            }
-        )
-    )
+        time.sleep(2 if status is JobStatus.RUNNING else 5)
 
     ws.close()
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # start dev server if invoke directly
+    app.run()
