@@ -48,6 +48,8 @@ def wrap_response(func):
                 'error': type(e).__name__
             }
 
+            traceback.print_exc()
+
             return err, 400
 
     # preserve old name
@@ -70,8 +72,6 @@ def wrap_ws(func):
                     'error': type(e).__name__
                 }
             )
-
-            traceback.print_exc()
 
             ws.send(err_packet)
             ws.close()
